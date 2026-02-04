@@ -7,28 +7,52 @@ This project currently includes a minimal AWS implementation and a LocalStack-ba
 
 ## Goals
 
-- Keep environment root modules (`envs/*`) **vendor-agnostic** and clean
-- Make cloud provider swap a matter of changing the **implementation module**, not rewriting environments
-- Provide a **demo-friendly workflow** using LocalStack for the `nonprod` stack
-- Model:
-  - 2 networks (conceptually): **prod** and **nonprod (dev+qa)**
-  - 2 Availability Zones
-  - VPN module present (toggleable), but typically disabled for LocalStack demos
+This repository is intentionally structured to make **cloud vendor changes low-friction**.
+
+- Provide a **clean, stable interface** for environments (`envs/*`) that does not depend on any specific cloud provider.
+- Encapsulate provider-specific details inside **vendor modules** (`modules/aws/*`, future `modules/azure/*`, `modules/gcp/*`).
+- Keep the top-level stacks simple to read, review, and operate.
+- Support a **fast local demo** (LocalStack) to validate networking changes quickly and cheaply.
+
+---
+## Why this architecture
+
+### Facade (contract) + vendor implementations
+
+At the core of this repo there is a **facade layer** (`modules/facade/*`) that defines the *contract* (inputs/outputs) for each capability (e.g., `network`, `vpn`).  
+Each cloud provider is implemented behind that contract (e.g., `modules/aws/network`, `modules/aws/vpn`).
+
+This gives you:
+
+- **Portability by design:** switching vendors means wiring a different implementation, not rewriting every environment.
+- **Consistency across environments:** `prod` and `nonprod` consume the same facade contract.
+- **Clean review surface:** environment code stays small and readable; provider complexity lives in implementation modules.
+- **Better testability:** you can validate the wiring and outputs locally (LocalStack) before touching real cloud resources.
+- **Incremental adoption:** start with AWS only, then add other vendors behind the same facade as needed.
+
+### What “vendor-agnostic” means here
+
+Terraform cannot be 100% provider-agnostic at the resource level.  
+Instead, this repo is **architecturally vendor-agnostic**: environments use stable contracts and do not directly reference provider resources.
 
 ---
 
-## Architecture
+## Solution Architecture (IaC design)
 
-### Logical diagram (vendor-agnostic)
+This repository uses a **Facade (contract) + Vendor Implementation** pattern.
 
-```text
-On-Prem/HQ  <---(S2S VPN, redundant tunnels)--->  Prod VPC (2 AZ)
-On-Prem/HQ  <---(S2S VPN, redundant tunnels)--->  NonProd VPC (Dev+QA, 2 AZ)
-```
+- **Facade modules** (`modules/facade/*`) define stable inputs/outputs for capabilities such as:
+  - `network`
+  - `vpn`
+- **Vendor modules** (`modules/aws/*`, future `modules/azure/*`, `modules/gcp/*`) implement those capabilities using provider-specific resources.
+- **Environment stacks** (`envs/*`) only depend on the facade contract, keeping environment code clean and portable.
 
-![Architecture Diagram](docs/images/architecture.png)
+### Key benefits
 
----
+- **Vendor swap with minimal blast radius:** environments keep calling the same facade; only the implementation changes.
+- **Consistent interfaces across stacks:** `prod` and `nonprod` consume the same contract.
+- **Cleaner reviews:** provider-specific complexity is isolated in vendor modules.
+- **Incremental multi-cloud:** start with one vendor, add others behind the same facade when needed.
 
 ## Repository structure
 
@@ -49,8 +73,81 @@ scripts/
   # optional helper scripts
 Makefile
 ```
-
 ---
+## How vendor switching works (high level)
+
+Terraform cannot be 100% vendor-agnostic at the resource level (AWS/Azure/GCP use different primitives).
+This repository achieves **practical portability** by standardizing **contracts** (inputs/outputs) and isolating
+provider-specific resources behind a facade.
+
+### The pattern
+
+1) **Environment stacks (`envs/*`) call facade modules only**
+   - `modules/facade/network`
+   - `modules/facade/vpn`
+
+2) **Facade modules define the contract**
+   - Inputs like: `name`, `network_cidr`, `subnets`, `tags`, `routing_mode`, etc.
+   - Outputs like: `network_id`, `private_subnet_ids`, `route_table_ids`, `vpn_endpoints`, etc.
+
+3) **Facade routes to a vendor implementation**
+   - Today: AWS implementations live under `modules/aws/*`
+   - Future: add `modules/azure/*`, `modules/gcp/*`, etc.
+   - The facade selects the correct implementation based on a single variable, e.g. `vendor = "aws"`.
+
+### What changes when you switch vendors
+
+- You **do not rewrite** `envs/prod` or `envs/nonprod`.
+- You add (or select) a different vendor implementation behind the same contract:
+  - implement `modules/<vendor>/network` and `modules/<vendor>/vpn`
+  - add a small routing block inside the facade modules
+
+In other words:
+- **Environment code stays stable**
+- **Only the implementation changes**
+
+### What may still change
+
+- Provider configuration in the environment (credentials, region, etc.)
+- Feature parity differences between vendors (e.g., VPN/BGP options)
+- Some defaults (naming, tagging, network constructs) may vary per vendor, but the contract remains the same
+
+### Minimal example
+
+Environments always call the same facade module:
+
+```hcl
+module "network" {
+  source = "../../modules/facade/network"
+  vendor = "aws" # later: "azure" or "gcp"
+  # ...same inputs
+}
+```
+
+# Demo: 
+
+## Reference Infrastructure Topology (demo/example)
+
+To demonstrate the practicality of the architecture, this repo includes a reference topology that can be deployed:
+- Locally (using LocalStack for `nonprod`), and/or
+- To real AWS (for `prod` and optionally `nonprod`)
+
+Reference topology:
+- Two logical networks:
+  - **prod** (isolated)
+  - **nonprod** (dev + qa)
+- Two Availability Zones
+- Private subnet layout (dev/qa segmented in nonprod)
+- VPN capability wired via facade (typically disabled for LocalStack demo)
+
+### Logical diagram (reference topology)
+
+```text
+On-Prem/HQ  <---(S2S VPN, redundant tunnels)--->  Prod VPC (2 AZ)
+On-Prem/HQ  <---(S2S VPN, redundant tunnels)--->  NonProd VPC (Dev+QA, 2 AZ)
+```
+![Reference Topology Demo Diagram](docs/images/reference-topology-demo.png)
+----
 
 ## Prerequisites
 
