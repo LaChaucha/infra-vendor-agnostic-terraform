@@ -200,12 +200,6 @@ nonprod_vpn_tunnels = tolist([])
 |  nonprod-private-rt|  rtb-c0e0de5e5c4ecba10  |  vpc-6c76d553d52902324  |
 +--------------------+-------------------------+-------------------------+
 ```
-
-> Optional screenshots to add under `docs/images/`:
-- `docs/images/localstack-status-all.png`
-- `docs/images/localstack-subnets.png`
-- `docs/images/localstack-rts.png`
-
 ---
 
 ## Troubleshooting (Windows + PowerShell + LocalStack)
